@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gold / Silver Ratio Signal</title>
+<meta name="theme-color" content="#1e1f29">
+<style>
+  :root{
+    --bg:#1e1f29; --card:#2a2b38; --line:#3a3c4c; --text:#e8e8f0; --muted:#9a9cb0;
+    --gold:#f5c542; --silver:#c9d1dc; --neutral:#3ddc6a; --lean:#8fb3ff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text);
+    background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);
+    background-size:40px 40px;background-attachment:fixed}
+  main{max-width:720px;margin:0 auto;padding:20px 16px 40px}
+  h1{font-size:1.25rem;margin:0 0 4px}
+  .sub{color:var(--muted);font-size:.85rem;margin:0 0 20px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px;margin-bottom:16px}
+  .ratio-wrap{text-align:center}
+  .ratio-label{color:var(--muted);font-size:.85rem;text-transform:uppercase;letter-spacing:.08em}
+  .ratio{font-size:4rem;font-weight:800;line-height:1.1;margin:6px 0;font-variant-numeric:tabular-nums}
+  .verdict{display:inline-block;padding:8px 18px;border-radius:999px;font-weight:700;font-size:1.1rem;border:2px solid currentColor}
+  .explain{color:var(--muted);margin:14px 0 0;font-size:.95rem;line-height:1.45}
+  .prices{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:18px}
+  .price{background:var(--bg);border-radius:10px;padding:10px;text-align:center}
+  .price b{display:block;font-size:1.2rem;font-variant-numeric:tabular-nums}
+  .price span{color:var(--muted);font-size:.8rem}
+  /* gauge */
+  .gauge{position:relative;height:18px;border-radius:9px;overflow:hidden;display:flex;margin:28px 0 6px}
+  .gauge div{height:100%}
+  .marker{position:absolute;top:-10px;width:4px;height:38px;background:#fff;border-radius:2px;transform:translateX(-2px);
+    box-shadow:0 0 0 2px var(--bg);transition:left .6s}
+  .gauge-box{position:relative}
+  .ticks{position:relative;height:16px;font-size:.72rem;color:var(--muted)}
+  .ticks span{position:absolute;transform:translateX(-50%)}
+  table{width:100%;border-collapse:collapse;font-size:.92rem}
+  td{padding:8px 6px;border-bottom:1px solid var(--line)}
+  tr.active td{background:rgba(255,255,255,.06);font-weight:700}
+  .dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:8px;vertical-align:middle}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  button,input{font:inherit;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--text);padding:8px 12px}
+  button{cursor:pointer;background:#3a3c4c}
+  button:hover{background:#4a4c5e}
+  input{width:110px}
+  .meta{color:var(--muted);font-size:.8rem;margin-top:10px;line-height:1.5}
+  .err{color:#ff8a80}
+  .disclaimer{color:var(--muted);font-size:.75rem;text-align:center;margin-top:20px}
+</style>
+</head>
+<body>
+<main>
+  <h1>Gold / Silver Ratio Signal</h1>
+  <p class="sub">How many ounces of silver one ounce of gold buys, and what that suggests right now.</p>
+
+  <section class="card ratio-wrap">
+    <div class="ratio-label">Current ratio</div>
+    <div class="ratio" id="ratio">--</div>
+    <div class="verdict" id="verdict">Loading...</div>
+    <p class="explain" id="explain"></p>
+
+    <div class="gauge-box">
+      <div class="gauge" id="gauge"></div>
+      <div class="marker" id="marker" style="left:-10px"></div>
+    </div>
+    <div class="ticks" id="ticks"></div>
+
+    <div class="prices">
+      <div class="price"><span>Gold (USD/oz)</span><b id="gold">--</b></div>
+      <div class="price"><span>Silver (USD/oz)</span><b id="silver">--</b></div>
+    </div>
+    <div class="meta" id="meta"></div>
+    <div class="row" style="justify-content:center;margin-top:12px">
+      <button id="refresh">↻ Refresh</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <table id="zones"></table>
+  </section>
+
+  <section class="card">
+    <div class="ratio-label" style="margin-bottom:10px">Check a ratio manually</div>
+    <div class="row">
+      <input id="manual" type="number" step="0.01" min="1" placeholder="e.g. 82.5">
+      <button id="apply">Show signal</button>
+      <button id="live">Back to live</button>
+    </div>
+  </section>
+
+  <p class="disclaimer">Data: goldprice.org (with fallbacks). This is a rule of thumb, not financial advice.</p>
+</main>
+
+<script>
+/* ---------- Signal zones (from the reference chart) ----------
+   ≥ 75        Silver attractive
+   65 – 75     gap in the chart → leaning silver
+   60 – 65     Neutral
+   55 – 60     gap in the chart → leaning gold
+   ≤ 55        Gold attractive                                   */
+const ZONES = [
+  { min: 75, max: Infinity, label: "Silver Attractive", color: "var(--silver)",
+    text: "Silver is cheap relative to gold. Favour adding to silver." },
+  { min: 65, max: 75, label: "Leaning Silver", color: "var(--lean)",
+    text: "Between Neutral and the Silver zone. Silver has the slight edge; no strong signal yet." },
+  { min: 60, max: 65, label: "Neutral", color: "var(--neutral)",
+    text: "Gold and silver are fairly valued against each other. No switch needed." },
+  { min: 55, max: 60, label: "Leaning Gold", color: "#e8b04a",
+    text: "Between Gold and Neutral zones. Gold has the slight edge; no strong signal yet." },
+  { min: -Infinity, max: 55, label: "Gold Attractive", color: "var(--gold)",
+    text: "Gold is cheap relative to silver. Favour adding to gold." },
+];
+const zoneFor = r => ZONES.find(z => r >= z.min && r < z.max) || ZONES[0];
+
+/* ---------- Data sources, tried in order ---------- */
+const GP_URL = "https://data-asg.goldprice.org/dbXRates/USD";
+const PROXIES = [
+  u => u,                                                        // direct
+  u => "https://corsproxy.io/?url=" + encodeURIComponent(u),
+  u => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
+];
+
+async function getJSON(url, ms = 8000) {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), ms);
+  try {
+    const r = await fetch(url, { signal: ctl.signal, cache: "no-store" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    return await r.json();
+  } finally { clearTimeout(t); }
+}
+
+function fromGoldprice(j) {
+  const it = j && j.items && j.items[0];
+  const g = +it?.xauPrice, s = +it?.xagPrice;
+  if (!(g > 0 && s > 0)) throw new Error("unexpected goldprice.org format");
+  return { gold: g, silver: s, ratio: g / s, time: j.date || new Date().toISOString() };
+}
+
+const SOURCES = [
+  ...PROXIES.map((p, i) => ({
+    name: "goldprice.org" + (i ? " (via proxy)" : ""),
+    load: async () => fromGoldprice(await getJSON(p(GP_URL))),
+  })),
+  {
+    name: "gold-api.com",
+    load: async () => {
+      const [g, s] = await Promise.all([
+        getJSON("https://api.gold-api.com/price/XAU"),
+        getJSON("https://api.gold-api.com/price/XAG"),
+      ]);
+      if (!(g.price > 0 && s.price > 0)) throw new Error("bad gold-api data");
+      return { gold: g.price, silver: s.price, ratio: g.price / s.price, time: g.updatedAt || new Date().toISOString() };
+    },
+  },
+  {
+    name: "cached data.json (GitHub Action)",
+    load: async () => {
+      const d = await getJSON("data.json?t=" + Date.now());
+      if (!(d.ratio > 0)) throw new Error("no cached data yet");
+      return d;
+    },
+  },
+];
+
+/* ---------- UI ---------- */
+const $ = id => document.getElementById(id);
+const GAUGE_MIN = 40, GAUGE_MAX = 100;
+const pct = v => ((Math.min(Math.max(v, GAUGE_MIN), GAUGE_MAX) - GAUGE_MIN) / (GAUGE_MAX - GAUGE_MIN)) * 100;
+const usd = v => v ? "$" + v.toLocaleString("en-US", { maximumFractionDigits: 2 }) : "--";
+
+function buildStatic() {
+  // gauge segments, low → high
+  [...ZONES].reverse().forEach(z => {
+    const lo = Math.max(z.min, GAUGE_MIN), hi = Math.min(z.max, GAUGE_MAX);
+    const d = document.createElement("div");
+    d.style.width = (pct(hi) - pct(lo)) + "%";
+    d.style.background = z.color;
+    d.title = z.label;
+    $("gauge").appendChild(d);
+  });
+  [40, 55, 60, 65, 75, 100].forEach(v => {
+    const s = document.createElement("span");
+    s.style.left = pct(v) + "%"; s.textContent = v;
+    $("ticks").appendChild(s);
+  });
+  $("zones").innerHTML = ZONES.map((z, i) => {
+    const range = z.max === Infinity ? `≥ ${z.min}` : z.min === -Infinity ? `< ${z.max}` : `${z.min} – ${z.max}`;
+    return `<tr data-i="${i}"><td><span class="dot" style="background:${z.color}"></span>${z.label}</td><td style="text-align:right">${range}</td></tr>`;
+  }).join("");
+}
+
+function render(d, sourceName) {
+  const z = zoneFor(d.ratio);
+  $("ratio").textContent = d.ratio.toFixed(2);
+  $("ratio").style.color = z.color;
+  $("verdict").textContent = z.label;
+  $("verdict").style.color = z.color;
+  $("explain").textContent = z.text;
+  $("marker").style.left = pct(d.ratio) + "%";
+  $("gold").textContent = usd(d.gold);
+  $("silver").textContent = usd(d.silver);
+  document.querySelectorAll("#zones tr").forEach(tr =>
+    tr.classList.toggle("active", ZONES[+tr.dataset.i] === z));
+  const when = d.time ? new Date(d.time) : null;
+  $("meta").innerHTML = `Source: ${sourceName}` +
+    (when && !isNaN(when) ? `<br>Price time: ${when.toLocaleString()}` : "") +
+    `<br>Checked: ${new Date().toLocaleTimeString()}`;
+  document.title = `${d.ratio.toFixed(1)} · ${z.label} | Gold/Silver`;
+}
+
+let manualMode = false;
+async function load() {
+  if (manualMode) return;
+  $("verdict").textContent = "Loading...";
+  const errors = [];
+  for (const src of SOURCES) {
+    try { render(await src.load(), src.name); return; }
+    catch (e) { errors.push(`${src.name}: ${e.message}`); }
+  }
+  $("verdict").textContent = "No data";
+  $("meta").innerHTML = `<span class="err">Could not load prices from any source.</span><br>` +
+    errors.join("<br>") + "<br>Enter the ratio from goldprice.org manually below.";
+}
+
+$("refresh").onclick = () => { manualMode = false; load(); };
+$("live").onclick = () => { manualMode = false; $("manual").value = ""; load(); };
+$("apply").onclick = () => {
+  const r = parseFloat($("manual").value);
+  if (!(r > 0)) return;
+  manualMode = true;
+  render({ ratio: r }, "manual entry");
+};
+$("manual").addEventListener("keydown", e => e.key === "Enter" && $("apply").click());
+
+buildStatic();
+load();
+setInterval(load, 5 * 60 * 1000); // auto-refresh every 5 minutes
+</script>
+</body>
+</html>
